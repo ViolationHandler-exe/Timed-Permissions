@@ -43,6 +43,8 @@ namespace Oxide.Plugins
                     PlayerInformation playerInformation = _playerInformationCollection[i];
                     playerInformation.Update();
                 }
+                
+                SaveData(_playerInformationCollection);
             });
         }
 
@@ -481,11 +483,6 @@ namespace Oxide.Plugins
                 _plugin.permission.RevokeUserPermission(Id, accessValue.Value);
 
                 _plugin.Puts($"{Name} ({Id}) - Permission removed: {accessValue.Value}");
-
-                if (_groups.Count == 0 && _permissions.Count == 0)
-                    _playerInformationCollection.Remove(this);
-
-                SaveData(_playerInformationCollection);
             }
 
             #endregion
@@ -529,11 +526,6 @@ namespace Oxide.Plugins
                 _plugin.permission.RemoveUserGroup(Id, accessValue.Value);
 
                 _plugin.Puts($"{Name} ({Id}) - Removed from group: {accessValue.Value}");
-
-                if (_groups.Count == 0 && _permissions.Count == 0)
-                    _playerInformationCollection.Remove(this);
-
-                SaveData(_playerInformationCollection);
             }
 
             #endregion
@@ -564,13 +556,22 @@ namespace Oxide.Plugins
 
             public void Update()
             {
-                foreach (ExpiringAccessValue permission in _permissions)
-                    if (permission.IsExpired)
-                        RemovePermission(permission.Value);
+                for (var index = _permissions.Count - 1; index >= 0; index--)
+                {
+                    ExpiringAccessValue permission = _permissions[index];
+                    
+                    if (permission.IsExpired) RemovePermission(permission.Value);
+                }
 
-                foreach (ExpiringAccessValue group in _groups)
-                    if (group.IsExpired)
-                        RemoveGroup(group.Value);
+                for (var index = _groups.Count - 1; index >= 0; index--)
+                {
+                    ExpiringAccessValue group = _groups[index];
+                    
+                    if (group.IsExpired) RemoveGroup(group.Value);
+                }
+
+                if (_groups.Count == 0 && _permissions.Count == 0)
+                    _playerInformationCollection.Remove(this);
             }
 
             #endregion
