@@ -9,7 +9,7 @@ using System;
 
 namespace Oxide.Plugins
 {
-    [Info("Timed Permissions", "LaserHydra", "1.6.1")]
+    [Info("Timed Permissions", "LaserHydra", "1.6.0")]
     [Description("Allows you to grant permissions or groups for a specific time")]
     class TimedPermissions : CovalencePlugin
     {
@@ -43,8 +43,6 @@ namespace Oxide.Plugins
                     PlayerInformation playerInformation = _playerInformationCollection[i];
                     playerInformation.Update();
                 }
-                
-                SaveData(_playerInformationCollection);
             });
         }
 
@@ -57,12 +55,13 @@ namespace Oxide.Plugins
         {
             LoadConfig(); // Ensure config is loaded at this point
 
-            if (!_config.WipeDataOnNewSave) return;
-            
-            string backupFileName;
-            ResetAllAccess(out backupFileName);
+            if (_config.WipeDataOnNewSave)
+            {
+                string backupFileName;
+                ResetAllAccess(out backupFileName);
 
-            PrintWarning($"New save file detected: all groups and permissions revoked and data cleared. Backup created at {backupFileName}.json");
+                PrintWarning($"New save file detected: all groups and permissions revoked and data cleared. Backup created at {backupFileName}.json");
+            }
         }
 
         #endregion
@@ -93,8 +92,8 @@ namespace Oxide.Plugins
                 string msg = GetMessage("Player Info", player.Id);
 
                 msg = msg.Replace("{player}", $"{information.Name} ({information.Id})");
-                msg = msg.Replace("{groups}", string.Join(", ", from g in information.Groups select $"{g.Value} until {g.ExpireDate.ToLongDateString() + " " + g.ExpireDate.ToShortTimeString()} UTC"));
-                msg = msg.Replace("{permissions}", string.Join(", ", from p in information.Permissions select $"{p.Value} until {p.ExpireDate.ToLongDateString() + " " + p.ExpireDate.ToShortTimeString()} UTC"));
+                msg = msg.Replace("{groups}", string.Join(", ", (from g in information.Groups select $"{g.Value} until {g.ExpireDate.ToLongDateString() + " " + g.ExpireDate.ToShortTimeString()} UTC").ToArray()));
+                msg = msg.Replace("{permissions}", string.Join(", ", (from p in information.Permissions select $"{p.Value} until {p.ExpireDate.ToLongDateString() + " " + p.ExpireDate.ToShortTimeString()} UTC").ToArray()));
 
                 player.Reply(msg);
             }
@@ -139,16 +138,14 @@ namespace Oxide.Plugins
                 return;
 
             PlayerInformation information = PlayerInformation.Get(target.Id);
-
-            string lowerArgOne = args[1].ToLower();
             
-            if (information == null || !information.Permissions.Any(p => p.Value == lowerArgOne))
+            if (information == null || !information.Permissions.Any(p => p.Value == args[1].ToLower()))
             {
-                player.Reply(GetMessage("User Doesn't Have Permission", player.Id).Replace("{target}", target.Name).Replace("{permission}", lowerArgOne));
+                player.Reply(GetMessage("User Doesn't Have Permission", player.Id).Replace("{target}", target.Name).Replace("{permission}", args[1].ToLower()));
                 return;
             }
 
-            information.RemovePermission(lowerArgOne);
+            information.RemovePermission(args[1].ToLower());
         }
 
         [Command("addgroup"), Permission(AdminPermission)]
@@ -190,16 +187,14 @@ namespace Oxide.Plugins
                 return;
 
             PlayerInformation information = PlayerInformation.Get(target.Id);
-            
-            string lowerArgOne = args[1].ToLower();
 
-            if (information == null || !information.Groups.Any(p => p.Value == lowerArgOne))
+            if (information == null || !information.Groups.Any(p => p.Value == args[1].ToLower()))
             {
-                player.Reply(GetMessage("User Isn't In Group", player.Id).Replace("{target}", target.Name).Replace("{group}", lowerArgOne));
+                player.Reply(GetMessage("User Isn't In Group", player.Id).Replace("{target}", target.Name).Replace("{group}", args[1].ToLower()));
                 return;
             }
 
-            information.RemoveGroup(lowerArgOne);
+            information.RemoveGroup(args[1].ToLower());
         }
 
         [Command("timedpermissions_resetaccess"), Permission(AdvancedAdminPermission)]
@@ -283,9 +278,9 @@ namespace Oxide.Plugins
 
         private IPlayer FindPlayer(string nameOrId, IPlayer player)
         {
-            if (nameOrId.IsSteamId())
+            if (IsConvertibleTo<ulong>(nameOrId) && nameOrId.StartsWith("7656119") && nameOrId.Length == 17)
             {
-                IPlayer result = players.FindPlayerById(nameOrId); // Better and quicker than .ToArray and .Find
+                IPlayer result = players.All.ToList().Find(p => p.Id == nameOrId);
 
                 if (result == null)
                     player.Reply($"Could not find player with ID '{nameOrId}'");
@@ -300,7 +295,7 @@ namespace Oxide.Plugins
                 if (string.Equals(current.Name, nameOrId, StringComparison.CurrentCultureIgnoreCase))
                     return current;
 
-                if (current.Name.IndexOf(nameOrId, StringComparison.CurrentCultureIgnoreCase) >= 0)
+                if (current.Name.ToLower().Contains(nameOrId.ToLower()))
                     foundPlayers.Add(current);
             }
 
@@ -313,8 +308,9 @@ namespace Oxide.Plugins
                 case 1:
                     return foundPlayers[0];
 
-                default: // No need to ToArray this shit
-                    player.Reply("Multiple matching players found: \n" + string.Join(", ", from current in foundPlayers select current.Name));
+                default:
+                    string[] names = (from current in foundPlayers select current.Name).ToArray();
+                    player.Reply("Multiple matching players found: \n" + string.Join(", ", names));
                     break;
             }
 
@@ -411,10 +407,10 @@ namespace Oxide.Plugins
         private class PlayerInformation
         {
             [JsonProperty("Id")]
-            public string Id { get; set; } // Probably don't need getters and setters for this
+            public string Id { get; set; }
 
             [JsonProperty("Name")]
-            public string Name { get; set; } // Probably don't need getters and setters for this
+            public string Name { get; set; }
 
             [JsonProperty("Permissions")]
             private readonly List<ExpiringAccessValue> _permissions = new List<ExpiringAccessValue>();
@@ -434,12 +430,13 @@ namespace Oxide.Plugins
             {
                 PlayerInformation information = Get(player.Id);
 
-                if (information != null) return information;
-                
-                information = new PlayerInformation(player);
+                if (information == null)
+                {
+                    information = new PlayerInformation(player);
 
-                _playerInformationCollection.Add(information);
-                SaveData(_playerInformationCollection);
+                    _playerInformationCollection.Add(information);
+                    SaveData(_playerInformationCollection);
+                }
 
                 return information;
             }
@@ -483,6 +480,11 @@ namespace Oxide.Plugins
                 _plugin.permission.RevokeUserPermission(Id, accessValue.Value);
 
                 _plugin.Puts($"{Name} ({Id}) - Permission removed: {accessValue.Value}");
+
+                if (_groups.Count == 0 && _permissions.Count == 0)
+                    _playerInformationCollection.Remove(this);
+
+                SaveData(_playerInformationCollection);
             }
 
             #endregion
@@ -526,6 +528,11 @@ namespace Oxide.Plugins
                 _plugin.permission.RemoveUserGroup(Id, accessValue.Value);
 
                 _plugin.Puts($"{Name} ({Id}) - Removed from group: {accessValue.Value}");
+
+                if (_groups.Count == 0 && _permissions.Count == 0)
+                    _playerInformationCollection.Remove(this);
+
+                SaveData(_playerInformationCollection);
             }
 
             #endregion
@@ -556,22 +563,13 @@ namespace Oxide.Plugins
 
             public void Update()
             {
-                for (var index = _permissions.Count - 1; index >= 0; index--)
-                {
-                    ExpiringAccessValue permission = _permissions[index];
-                    
-                    if (permission.IsExpired) RemovePermission(permission.Value);
-                }
+                foreach (ExpiringAccessValue permission in _permissions.ToList())
+                    if (permission.IsExpired)
+                        RemovePermission(permission.Value);
 
-                for (var index = _groups.Count - 1; index >= 0; index--)
-                {
-                    ExpiringAccessValue group = _groups[index];
-                    
-                    if (group.IsExpired) RemoveGroup(group.Value);
-                }
-
-                if (_groups.Count == 0 && _permissions.Count == 0)
-                    _playerInformationCollection.Remove(this);
+                foreach (ExpiringAccessValue group in _groups.ToList())
+                    if (group.IsExpired)
+                        RemoveGroup(group.Value);
             }
 
             #endregion
@@ -596,7 +594,7 @@ namespace Oxide.Plugins
             public string Value { get; private set; }
 
             [JsonProperty]
-            public DateTime ExpireDate { get; set; }  // Probably don't need getters and setters for this
+            public DateTime ExpireDate { get; set; }
 
             [JsonIgnore]
             public bool IsExpired => DateTime.Compare(DateTime.UtcNow, ExpireDate) > 0;
